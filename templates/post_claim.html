@@ -1,8 +1,10 @@
 <html>
 <body>
 {% if error %}
+<h2>Error!</h2>
 <p class="error">{{ error }}</p>
 {% else %}
+<h2>Success!</h2>
 Congratulations, you just claimed this device!
 <a href="/">go back</a>
 {% endif %}

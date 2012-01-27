@@ -1,14 +1,19 @@
 <html>
 <body>
+<h2>Register a new account
+{% for error in get_flashed_messages() %}
 <p class="error">{{ error }}</p>
+{% endfor %}
 <form action="" method="POST">
-<label>login<input type="text" name="login" value="{{ login }}"></label>
-<label>password<input type="password" name="password"></label>
-<label>confirm password<input type="password" name="password2"></label>
-<label>homepage url<input type="text" name="url" value="{{ url }}"></label>
-<label>use wiki page as url<input type="checkbox" name="wiki" 
-  value="yes" {% if wiki == 'yes' %}checked="yes"{% endif %}></label>
-<input type="submit" value="register"></input>
+<table>
+<label><tr><td>login</td><td><input type="text" name="login" value="{{ login }}"></td></tr></label>
+<label><tr><td>password</td><td><input type="password" name="password"></td></tr></label>
+<label><tr><td>confirm password</td><td><input type="password" name="password2"></td></tr></label>
+<label><tr><td>homepage url</td><td><input type="text" name="url" value="{{ url }}"></td></tr></label>
+<label><tr><td>use wiki page as url</td><td><input type="checkbox" name="wiki" 
+  value="yes" {% if wiki == 'yes' %}checked="yes"{% endif %}></td></tr</label>
+<tr><td></td><td><input type="submit" value="register"></input></td></tr>
+</table>
 </form>
 </body>
 </html>

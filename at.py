@@ -5,53 +5,42 @@ import sqlite3
 import threading
 import traceback
 import json
+from flask import Flask, render_template, abort, redirect, session, request, flash, g
 from datetime import datetime
 from wsgiref import simple_server
 from pesto import Response, dispatcher_app
-from pesto.session import session_middleware
-from pesto.session.memorysessionmanager import MemorySessionManager
 from time import sleep, time
 from collections import namedtuple
-from jinja2 import Environment, FileSystemLoader 
 from urllib import urlencode
 from hashlib import sha256
 
 import config
 
-dispatcher = dispatcher_app()
-app = session_middleware(MemorySessionManager())(dispatcher)
+app = Flask('at')
+app.secret_key = config.secret_key
 logger = logging.getLogger()
-env = Environment(loader=FileSystemLoader('templates'),
-    autoescape='html',
-    extensions=['jinja2.ext.autoescape'])
 conn = None
 updater = None
 
 from functools import wraps
-def render(filepath):
-    def decorator(f):
-        @wraps(f)
-        def func(request, *a, **kw):
-            template = env.get_template(filepath)
-            data = f(request, *a, **kw)
-            return Response([template.render(**data)])
-        return func
-    return decorator
 
-def restrict_ip(prefix='', exclude=[], fail_response=Response(status=403)):
+def restrict_ip(prefix='', exclude=[]):
     def decorator(f):
         @wraps(f)
-        def func(request, *a, **kw):
+        def func(*a, **kw):
             r_addr = request.remote_addr
             if not r_addr.startswith(prefix) or r_addr in exclude:
-                return fail_response
-            return f(request, *a, **kw)
+                abort(403)
+            return f(*a, **kw)
         return func
     return decorator
 
+def req_to_ctx():
+    return dict(request.form.iteritems())
+
+@app.template_filter('strfts')
 def strfts(ts, format='%d/%m/%Y %H:%M'):
     return datetime.fromtimestamp(ts).strftime(format)
-env.filters['strfts'] = strfts
 
 def setup_db():
     conn = sqlite3.connect(config.db)
@@ -96,6 +85,7 @@ class Updater(threading.Thread):
             self.get_active_devices().iteritems():
             if ip == dip:
                 return hwaddr, name
+        return None, None
     def update(self, hwaddr, atime = None, ip = None, name = None):
         atime = atime or time()
         self.lock.acquire()
@@ -147,16 +137,14 @@ class DnsmasqUpdater(Updater):
                 logging.error('Updater got an exception:\n' + \
                     traceback.format_exc(e))
                 sleep(10.0)
-                
+        
+@app.route('/')
+def main_view():
+    return render_template('main.html', **now_at())
 
-@dispatcher.match('/', 'GET')
-@render('main.html')
-def main_view(request):
-    return now_at(request)
-
-@dispatcher.match('/api', 'GET')
-def list_all(request):
-    result = now_at(request)
+@app.route('/api')
+def list_all():
+    result = now_at()
     def prettify_user((user, atime)):
         return {
             'login': user.login,
@@ -167,10 +155,9 @@ def list_all(request):
     result['users'] = map(prettify_user, result['users'])
     result['unknown'] = len(result['unknown'])
     del result['login']
-    return Response(json.dumps(result))
+    return json.dumps(result)
 
-
-def now_at(request):
+def now_at():
     devices = updater.get_active_devices()
     device_infos = list(get_device_infos(conn, devices.keys()))
     device_infos.sort(key=lambda di: devices.__getitem__)
@@ -178,106 +165,103 @@ def now_at(request):
         if info.owner and not info.ignored).iteritems())
     users.sort(key=lambda (u, a): a, reverse=True)
     unknown = set(devices.keys()) - set(d.hwaddr for d in device_infos)
-    return dict(users=users, unknown=unknown, login=request.session.get('login'))
+    return dict(users=users, unknown=unknown, login=session.get('login'))
 
 restrict_to_hs = restrict_ip(prefix=config.claimable_prefix, 
     exclude=config.claimable_exclude)
 
-@dispatcher.match('/register', 'GET')
+@app.route('/register', methods=['GET'])
 @restrict_to_hs
-@render('register.html')
-def register_form(request):
-    return request.form
+def register_form():
+    return render_template('register.html', **req_to_ctx())
 
-@dispatcher.match('/register', 'POST')
+@app.route('/register', methods=['POST'])
 @restrict_to_hs
-def register(request):
-    login = request['login']
-    url = request['url']
+def register():
+    login = request.form['login']
+    url = request.form['url']
     if 'wiki' in request.form:
         url = config.wiki_url % { 'login': login }
     try:
         conn.execute('insert into users (login, url, pass) values (?, ?, ?)',
-            [login, url, sha256(request['password']).hexdigest()])
-        return Response.redirect('/')
+            [login, url, sha256(request.form['password']).hexdigest()])
+        return redirect('/')
     except sqlite3.Error as e:
-        request.form['error'] = 'Cannot add user - username taken?'
-        return register_form(request)
+        flash('Cannot add user - username taken?', category='error')
+        return register_form()
 
-@dispatcher.match('/login', 'GET')
+@app.route('/login', methods=['GET'])
 @restrict_to_hs
-@render('login.html')
-def login_form(request):
-    return request.form
+def login_form():
+    return render_template('login.html', **req_to_ctx())
 
 def get_credentials(login, password):
     row = conn.execute('select userid from users where login = ? and pass = ?',
         [login, sha256(password).hexdigest()]).fetchone()
     return row and row['userid']
 
-@dispatcher.match('/login', 'POST')
+@app.route('/login', methods=['POST'])
 @restrict_to_hs
-def login(request):
-    login = request.get('login')
-    pwd = request.get('password')
-    goto = request.get('goto') or '/'
+def login():
+    login = request.form.get('login', '')
+    pwd = request.form.get('password', '')
+    goto = request.values.get('goto') or '/'
     userid = get_credentials(login, pwd)
     if userid:
-        request.session['userid'] = userid
-        request.session['login'] = login
-        return Response.redirect(goto)
+        session['userid'] = userid
+        session['login'] = login
+        return redirect(goto)
     else:
-        request.form['error'] = 'Username or password invalid'
-        return login_form(request)
+        flash('Username or password invalid', category='error')
+        return login_form()
 
-@dispatcher.match('/logout', 'GET')
+@app.route('/logout')
 @restrict_to_hs
-def logout(request):
-    request.session.clear()
-    return Response.redirect('/')
+def logout():
+    session.clear()
+    return redirect('/')
 
 def login_required(f):
     @wraps(f)
-    def func(request, *a, **kw):
-        if 'userid' not in request.session:
-            return Response.redirect('/login?' + 
-                urlencode({'goto': request.path_info,
-                    'error': 'You must log in to continue'}))
-        return f(request, *a, **kw)
+    def func(*a, **kw):
+        if 'userid' not in session:
+            flash('You must log in to continue', category='error')
+            return redirect('/login?' + 
+                urlencode({'goto': request.path}))
+        return f(*a, **kw)
     return func
 
-@dispatcher.match('/claim', 'GET')
+@app.route('/claim', methods=['GET'])
 @restrict_to_hs
 @login_required
-@render('claim.html')
-def claim_form(request):
+def claim_form():
     hwaddr, name = updater.get_device(request.remote_addr)
-    return { 'hwaddr': hwaddr, 'name': name, 
-        'login': request.session['login'] }
+    return render_template('claim.html', hwaddr=hwaddr, name=name, 
+        login=session['login'])
 
-@dispatcher.match('/claim', 'POST')
+@app.route('/claim', methods=['POST'])
 @restrict_to_hs
 @login_required
-@render('post_claim.html')
-def claim(request):
+def claim():
     hwaddr, lease_name = updater.get_device(request.remote_addr)
+    ctx = None
     if not hwaddr:
-        return { 'error': 'Invalid device.' }
-    userid = request.session['userid']
-    try:
-        conn.execute('insert into devices (hwaddr, name, owner, ignored)\
-            values (?, ?, ?, ?)', [hwaddr, request['name'], userid, False])
-        return {}
-    except sqlite3.Error as e:
-        return { 'error': 'Could not add device! Perhaps someone claimed it?' }
+        ctx = { 'error': 'Invalid device.' }
+    else:
+        userid = session['userid']
+        try:
+            conn.execute('insert into devices (hwaddr, name, owner, ignored)\
+                values (?, ?, ?, ?)', [hwaddr, request.form['name'], userid, False])
+            ctx = {}
+        except sqlite3.Error as e:
+            ctx = { 'error': 'Could not add device! Perhaps someone claimed it?' }
+    return render_template('post_claim.html', **ctx)
 
 port = 8080
 if __name__ == '__main__':
-    print env.list_templates()
     logger.setLevel(logging.DEBUG)
     logger.addHandler(logging.StreamHandler())
     conn = setup_db()
     updater = DnsmasqUpdater(config.lease_file, config.lease_offset, config.timeout)
     updater.start()
-    server = simple_server.make_server('', port, app)
-    server.serve_forever()
+    app.run('0.0.0.0')

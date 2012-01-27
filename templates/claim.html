@@ -1,14 +1,17 @@
 <html>
 <body>
+<h2>Claiming a device</h2>
 {% if not hwaddr %}
 <p class="error">Unknown MAC. Are you sure you're in the hackerspace?</p>
 {% else %}
-You are about to claim {{ hwaddr }} as {{ login }}. Do you wish to continue?
+You are about to claim <strong>{{ hwaddr }}</strong> as <strong>{{ login }}</strong>. Do you wish to continue?
+<table>
 <form action="" method="post">
-<label>Device name (optional):<input type="text" name="name" value="{{ name }}"></label>
-<input type="submit" value="yes">
+<label><tr><td>Device name (optional):</td><td><input type="text" name="name" value="{{ name }}"></td></tr></label>
+<tr><td><input type="submit" value="yes"></td>
 </form>
-<a href="/"><button>no</button></button>
+<td><a href="/"><button>no</button></button></td>
+</table>
 {% endif %}
 </body>
 </html>
