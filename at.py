@@ -4,6 +4,7 @@ import logging
 import sqlite3
 import threading
 import traceback
+import json
 from datetime import datetime
 from wsgiref import simple_server
 from pesto import Response, dispatcher_app
@@ -150,6 +151,25 @@ class DnsmasqUpdater(Updater):
 
 @dispatcher.match('/', 'GET')
 @render('main.html')
+def main_view(request):
+    return now_at(request)
+
+@dispatcher.match('/api', 'GET')
+def list_all(request):
+    result = now_at(request)
+    def prettify_user((user, atime)):
+        return {
+            'login': user.login,
+            'timestamp': atime,
+            'pretty_time': strfts(atime),
+            'url': user.url,
+        }
+    result['users'] = map(prettify_user, result['users'])
+    result['unknown'] = len(result['unknown'])
+    del result['login']
+    return Response(json.dumps(result))
+
+
 def now_at(request):
     devices = updater.get_active_devices()
     device_infos = list(get_device_infos(conn, devices.keys()))
