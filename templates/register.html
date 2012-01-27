@@ -1,0 +1,14 @@
+<html>
+<body>
+<p class="error">{{ error }}</p>
+<form action="" method="POST">
+<label>login<input type="text" name="login" value="{{ login }}"></label>
+<label>password<input type="password" name="password"></label>
+<label>confirm password<input type="password" name="password2"></label>
+<label>homepage url<input type="text" name="url" value="{{ url }}"></label>
+<label>use wiki page as url<input type="checkbox" name="wiki" 
+  value="yes" {% if wiki == 'yes' %}checked="yes"{% endif %}></label>
+<input type="submit" value="register"></input>
+</form>
+</body>
+</html>

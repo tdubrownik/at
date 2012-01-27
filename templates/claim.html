@@ -1,0 +1,14 @@
+<html>
+<body>
+{% if not hwaddr %}
+<p class="error">Unknown MAC. Are you sure you're in the hackerspace?</p>
+{% else %}
+You are about to claim {{ hwaddr }} as {{ login }}. Do you wish to continue?
+<form action="" method="post">
+<label>Device name (optional):<input type="text" name="name" value="{{ name }}"></label>
+<input type="submit" value="yes">
+</form>
+<a href="/"><button>no</button></button>
+{% endif %}
+</body>
+</html>

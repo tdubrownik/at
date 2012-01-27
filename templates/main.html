@@ -1,4 +1,12 @@
 <html>
+<body>
+<div class="login">
+{% if login %}
+logged in as {{ login }} | <a href="logout">log out</a>
+{% else %}
+<a href="login">login</a> | <a href="register">register</a>
+{% endif %}
+</div>
 Recently at <a href="http://www.hackerspace.pl">hackerspace</a>:
 <ul>
 {% for user, timestamp in users %}
@@ -10,5 +18,6 @@ Recently at <a href="http://www.hackerspace.pl">hackerspace</a>:
 {% endfor %}
 </ul>
 <hr>
-There are {{ unknown|length }} unknown devices operating.
+There are {{ unknown|length }} unknown devices operating. <a href="claim">Claim this device!</a>
+</body>
 </html>
