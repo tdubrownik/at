@@ -264,4 +264,4 @@ if __name__ == '__main__':
     conn = setup_db()
     updater = DnsmasqUpdater(config.lease_file, config.lease_offset, config.timeout)
     updater.start()
-    app.run('0.0.0.0')
+    app.run('0.0.0.0', config.port)
