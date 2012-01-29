@@ -6,6 +6,7 @@ import traceback
 import json
 from flask import Flask, render_template, abort, g, \
     redirect, session, request, flash, url_for
+from werkzeug.contrib.fixers import ProxyFix
 from datetime import datetime
 from wsgiref import simple_server
 from pesto import Response, dispatcher_app
@@ -17,6 +18,7 @@ from hashlib import sha256
 import config
 
 app = Flask('at')
+app.wsgi_app = ProxyFix(app.wsgi_app)
 app.secret_key = config.secret_key
 updater = None
 
