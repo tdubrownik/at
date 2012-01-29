@@ -1,0 +1,17 @@
+p.error {
+  color: red
+}
+p.message {
+  color: green
+}
+table.devices, .devices td, .devices th {
+  padding: .5em;
+  border: 1px solid black;
+  border-collapse: collapse;
+}
+td.invisible {
+  background-color: red
+}
+td.visible {
+  background-color: green
+}

@@ -1,11 +1,11 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
-import logging
 import sqlite3
 import threading
 import traceback
 import json
-from flask import Flask, render_template, abort, redirect, session, request, flash, g
+from flask import Flask, render_template, abort, g, \
+    redirect, session, request, flash, url_for
 from datetime import datetime
 from wsgiref import simple_server
 from pesto import Response, dispatcher_app
@@ -18,8 +18,6 @@ import config
 
 app = Flask('at')
 app.secret_key = config.secret_key
-logger = logging.getLogger()
-conn = None
 updater = None
 
 from functools import wraps
@@ -42,26 +40,32 @@ def req_to_ctx():
 def strfts(ts, format='%d/%m/%Y %H:%M'):
     return datetime.fromtimestamp(ts).strftime(format)
 
-def setup_db():
+@app.before_request
+def make_connection():
     conn = sqlite3.connect(config.db)
     conn.row_factory = sqlite3.Row
     conn.isolation_level = None # for autocommit mode
-    return conn
+    g.db = conn
 
-DeviceInfo = namedtuple('DeviceInfo', ['hwaddr', 'owner', 'ignored'])
-User = namedtuple('User', ['login', 'passwd', 'url'])
+@app.teardown_request
+def close_connection(exception):
+    g.db.close()
+
+DeviceInfo = namedtuple('DeviceInfo', ['hwaddr', 'name', 'owner', 'ignored'])
+User = namedtuple('User', ['id', 'login', 'passwd', 'url'])
 
 def get_device_info(conn, hwaddr):
     return list(get_device_infos(conn, (hwaddrs,)))[0]
 
 def get_device_infos(conn, hwaddrs):
-    stmt = '''select hwaddr, name, ignored, login, url from 
+    stmt = '''select hwaddr, name, ignored, userid, login, url from 
         devices left join users on devices.owner = users.userid
         where devices.hwaddr in (''' + ','.join(['?'] * len(hwaddrs)) + ')'
     for row in conn.execute(stmt, hwaddrs):
-        owner = User(row['login'], None, row['url']) if row['login'] else None
+        owner = User(row['userid'], row['login'], None, row['url']) \
+            if row['login'] else None
         ignored = row['ignored']
-        yield DeviceInfo(row['hwaddr'], owner, ignored)
+        yield DeviceInfo(row['hwaddr'], row['name'], owner, ignored)
 
 class Updater(threading.Thread):
     def __init__(self,  timeout, *a, **kw):
@@ -91,7 +95,7 @@ class Updater(threading.Thread):
         self.lock.acquire()
         self.active[hwaddr] = (atime, ip, name)
         self.lock.release()
-        logger.info('updated %s with atime %s and ip %s',
+        app.logger.info('updated %s with atime %s and ip %s',
             hwaddr, strfts(atime), ip)
 
 class CapUpdater(Updater):
@@ -102,15 +106,15 @@ class CapUpdater(Updater):
         while True:
             try:
                 with open(self.cap_file, 'r', buffering=0) as f:
-                    logger.info('Updater ready on cap file %s', self.cap_file)
+                    app.logger.info('Updater ready on cap file %s', self.cap_file)
                     while True:
                         hwaddr = f.readline().strip()
                         if not hwaddr:
                             break
                         self.update(hwaddr)
-                logging.warning('Cap file %s closed, reopening', self.cap_file)
+                app.logger.warning('Cap file %s closed, reopening', self.cap_file)
             except Exception as e:
-                logging.error('Updater got an exception:\n' + \
+                app.logger.error('Updater got an exception:\n' + \
                     traceback.format_exc(e))
                 sleep(10.0)
 
@@ -126,7 +130,7 @@ class DnsmasqUpdater(Updater):
             try:
                 mtime = os.stat(self.lease_file).st_mtime
                 if mtime > self.last_modified:
-                    logger.info('Lease file changed, updating')
+                    app.logger.info('Lease file changed, updating')
                     with open(self.lease_file, 'r') as f:
                         for line in f:
                             ts, hwaddr, ip, name, client_id = line.split(' ')
@@ -134,7 +138,7 @@ class DnsmasqUpdater(Updater):
                 self.last_modified = mtime
                 sleep(3.0)
             except Exception as e:
-                logging.error('Updater got an exception:\n' + \
+                app.logger.error('Updater got an exception:\n' + \
                     traceback.format_exc(e))
                 sleep(10.0)
         
@@ -154,18 +158,17 @@ def list_all():
         }
     result['users'] = map(prettify_user, result['users'])
     result['unknown'] = len(result['unknown'])
-    del result['login']
     return json.dumps(result)
 
 def now_at():
     devices = updater.get_active_devices()
-    device_infos = list(get_device_infos(conn, devices.keys()))
+    device_infos = list(get_device_infos(g.db, devices.keys()))
     device_infos.sort(key=lambda di: devices.__getitem__)
     users = list(dict((info.owner, devices[info.hwaddr][0]) for info in device_infos 
         if info.owner and not info.ignored).iteritems())
     users.sort(key=lambda (u, a): a, reverse=True)
     unknown = set(devices.keys()) - set(d.hwaddr for d in device_infos)
-    return dict(users=users, unknown=unknown, login=session.get('login'))
+    return dict(users=users, unknown=unknown)
 
 restrict_to_hs = restrict_ip(prefix=config.claimable_prefix, 
     exclude=config.claimable_exclude)
@@ -178,12 +181,12 @@ def register_form():
 @app.route('/register', methods=['POST'])
 @restrict_to_hs
 def register():
-    login = request.form['login']
+    login = request.form['login'].lower()
     url = request.form['url']
     if 'wiki' in request.form:
         url = config.wiki_url % { 'login': login }
     try:
-        conn.execute('insert into users (login, url, pass) values (?, ?, ?)',
+        g.db.execute('insert into users (login, url, pass) values (?, ?, ?)',
             [login, url, sha256(request.form['password']).hexdigest()])
         return redirect('/')
     except sqlite3.Error as e:
@@ -195,21 +198,22 @@ def register():
 def login_form():
     return render_template('login.html', **req_to_ctx())
 
-def get_credentials(login, password):
-    row = conn.execute('select userid from users where login = ? and pass = ?',
-        [login, sha256(password).hexdigest()]).fetchone()
-    return row and row['userid']
+def get_user(conn, login, password):
+    row = conn.execute('select userid, login, pass, url from users where\
+     login = ? and pass = ?', [login, sha256(password).hexdigest()]).fetchone()
+    return row and User(row['userid'], row['login'], None, row['url'])
 
 @app.route('/login', methods=['POST'])
 @restrict_to_hs
 def login():
-    login = request.form.get('login', '')
+    login = request.form.get('login', '').lower()
     pwd = request.form.get('password', '')
     goto = request.values.get('goto') or '/'
-    userid = get_credentials(login, pwd)
-    if userid:
-        session['userid'] = userid
-        session['login'] = login
+    user = get_user(g.db, login, pwd)
+    if user:
+        session['userid'] = user.id
+        session['login'] = user.login
+        session['user'] = user
         return redirect(goto)
     else:
         flash('Username or password invalid', category='error')
@@ -236,8 +240,7 @@ def login_required(f):
 @login_required
 def claim_form():
     hwaddr, name = updater.get_device(request.remote_addr)
-    return render_template('claim.html', hwaddr=hwaddr, name=name, 
-        login=session['login'])
+    return render_template('claim.html', hwaddr=hwaddr, name=name)
 
 @app.route('/claim', methods=['POST'])
 @restrict_to_hs
@@ -250,18 +253,60 @@ def claim():
     else:
         userid = session['userid']
         try:
-            conn.execute('insert into devices (hwaddr, name, owner, ignored)\
+            g.db.execute('insert into devices (hwaddr, name, owner, ignored)\
                 values (?, ?, ?, ?)', [hwaddr, request.form['name'], userid, False])
             ctx = {}
         except sqlite3.Error as e:
             ctx = { 'error': 'Could not add device! Perhaps someone claimed it?' }
     return render_template('post_claim.html', **ctx)
 
+def get_user_devices(conn, user):
+    devs = conn.execute('select hwaddr, name, ignored from devices where\
+ owner = ?', [user.id])
+    return (DeviceInfo(row['hwaddr'], row['name'], user, row['ignored']) for
+        row in devs)
+
+def set_password(conn, user, password):
+    return conn.execute('update users set pass = ? where userid = ?',
+        [sha256(password).hexdigest(), user.id])
+
+@app.route('/account', methods=['GET','POST'])
+@login_required
+def account():
+    if request.method == 'POST':
+        old = request.form['old']
+        if get_user(g.db, session['login'], old) and \
+            set_password(g.db, session['user'], request.form['new']):
+                flash('Password changed', category='message')
+        else:
+            flash('Could not change password!', category='error')
+    devices = get_user_devices(g.db, session['user'])
+    return render_template('account.html', devices=devices)
+
+def set_ignored(conn, hwaddr, user, value):
+    return conn.execute('update devices set ignored = ? where hwaddr = ? and owner = ?',
+        [value, hwaddr, user.id])
+
+def delete_device(conn, hwaddr, user):
+    return conn.execute('delete from devices where hwaddr = ? and owner = ?',
+        [hwaddr, user.id])
+
+@app.route('/devices/<id>/<action>/')
+@login_required
+def device(id, action):
+    user = session['user']
+    if action == 'hide':
+        set_ignored(g.db, id, user, True)
+    if action == 'show':
+        set_ignored(g.db, id, user, False)
+    if action == 'delete':
+        delete_device(g.db, id, user)
+    return redirect(url_for('account'))
+
 port = 8080
 if __name__ == '__main__':
-    logger.setLevel(logging.DEBUG)
-    logger.addHandler(logging.StreamHandler())
-    conn = setup_db()
+    import logging
+    app.logger.setLevel(logging.DEBUG)
     updater = DnsmasqUpdater(config.lease_file, config.lease_offset, config.timeout)
     updater.start()
-    app.run('0.0.0.0', config.port)
+    app.run('0.0.0.0', config.port, debug=config.debug)

@@ -1,5 +1,5 @@
-<html>
-<body>
+{% extends "basic.html" %}
+{% block content %}
 {% if error %}
 <h2>Error!</h2>
 <p class="error">{{ error }}</p>
@@ -8,5 +8,4 @@
 Congratulations, you just claimed this device!
 <a href="/">go back</a>
 {% endif %}
-</body>
-</html>
+{% endblock %}

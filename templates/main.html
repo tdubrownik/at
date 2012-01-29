@@ -1,24 +1,22 @@
-<html>
-<body>
-<h2>Now at hackerspace!</h2>
-<div class="login">
-{% if login %}
-logged in as {{ login }} | <a href="logout">log out</a>
-{% else %}
-<a href="login">login</a> | <a href="register">register</a>
-{% endif %}
-</div>
-Recently at <a href="http://www.hackerspace.pl">hackerspace</a>:
-<ul>
-{% for user, timestamp in users %}
-<li>
-{% if user.url %}<a href="{{ user.url }}">{% endif %}
-{{ user.login }} ({{ timestamp|strfts() }})
-{% if user.url %}</a>{% endif %}
-</li>
-{% endfor %}
-</ul>
-<hr>
-There are {{ unknown|length }} unknown devices operating. <a href="claim">Claim this device!</a>
-</body>
-</html>
+{% extends "basic.html" %}
+{% block title %}
+Now at hackerspace
+{% endblock %}
+{% block content %}
+  <h2>Now at hackerspace!</h2>
+  Recently at <a href="http://www.hackerspace.pl">hackerspace</a>:
+  <ul>
+  {% for user, timestamp in users %}
+    <li>
+    {% if user.url %}
+      <a href="{{ user.url }}">{% endif %}
+      {{ user.login }} ({{ timestamp|strfts() }})
+      {% if user.url %}</a>
+    {% endif %}
+    </li>
+  {% endfor %}
+  </ul>
+  <hr>
+  There are {{ unknown|length }} unknown devices operating. 
+  <a href="claim">Claim this device!</a>
+{% endblock %}

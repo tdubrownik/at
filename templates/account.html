@@ -1,0 +1,55 @@
+{% extends "basic.html" %}
+{% block content %}
+<a href="/">Back to homepage</a>
+<h2>Account settings</h2>
+{% for msg in get_flashed_messages(True) %}
+  <p class="{{ msg[0] }}">{{ msg[1] }}</p>
+{% endfor %}
+<h3>Change password</h3>
+<form action="" method="POST">
+  <table>
+    <label><tr>
+      <td>Current password:</td>
+      <td><input type="password" name="old"></td>
+    </tr></label>
+    <label><tr>
+      <td>New password:</td>
+      <td><input type="password" name="new"></td>
+    </tr></label>
+    <label><tr>
+      <td>Confirm new password:</td>
+      <td><input type="password" name="new2"></td>
+    </tr></label>
+    <label><tr>
+      <td></td>
+      <td><input type="submit" value="Save"></td>
+    </tr></label>
+  </table>
+</form>
+<h3>Claimed devices</h3>
+<table class="devices">
+  <tr>
+    <th>MAC</th>
+    <th>Device name</th>
+    <th>Visible</th>
+    <th>Toggle visibility</th>
+    <th>Delete</th>
+  </tr>
+{% for device in devices %}
+  <tr>
+    <td>{{ device.hwaddr }}</td>
+    <td>{{ device.name }}</td>
+    {% if device.ignored %}
+      <td class="invisible">invisible</td>
+      <td><a href="devices/{{ device.hwaddr }}/show">make visible</a></td>
+    {% else %}
+    <td class="visible">visible</td>
+      <td><a href="devices/{{ device.hwaddr }}/hide">make invisible</a></td>
+    {% endif %}
+    <td><a href="devices/{{ device.hwaddr }}/delete">delete device</a></td>
+  </tr>
+  </tbody>
+{% endfor%}
+</table>
+<p><a href="/claim">claim this device</a>
+{% endblock %}
