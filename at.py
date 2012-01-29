@@ -194,7 +194,6 @@ def register():
         return register_form()
 
 @app.route('/login', methods=['GET'])
-@restrict_to_hs
 def login_form():
     return render_template('login.html', **req_to_ctx())
 
@@ -204,7 +203,6 @@ def get_user(conn, login, password):
     return row and User(row['userid'], row['login'], None, row['url'])
 
 @app.route('/login', methods=['POST'])
-@restrict_to_hs
 def login():
     login = request.form.get('login', '').lower()
     pwd = request.form.get('password', '')
@@ -220,7 +218,6 @@ def login():
         return login_form()
 
 @app.route('/logout')
-@restrict_to_hs
 def logout():
     session.clear()
     return redirect('/')
