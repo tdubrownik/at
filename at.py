@@ -20,6 +20,8 @@ import config
 app = Flask('at')
 app.wsgi_app = ProxyFix(app.wsgi_app)
 app.secret_key = config.secret_key
+app.jinja_env.add_extension('jinja2.ext.i18n')
+app.jinja_env.install_null_translations()
 updater = None
 
 from functools import wraps

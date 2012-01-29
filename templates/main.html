@@ -16,7 +16,11 @@ Now at hackerspace
     </li>
   {% endfor %}
   </ul>
+  {% trans n_unk=unknown|length %}
+  There is {{ n_unk }} unknown device operating. 
+  {% pluralize %}
+  There are {{ n_unk }} unknown devices operating. 
+  {% endtrans %}
   <hr>
-  There are {{ unknown|length }} unknown devices operating. 
   <a href="claim">Claim this device!</a>
 {% endblock %}
