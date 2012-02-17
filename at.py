@@ -72,9 +72,10 @@ def get_device_infos(conn, hwaddrs):
         yield DeviceInfo(row['hwaddr'], row['name'], owner, ignored)
 
 class Updater(threading.Thread):
-    def __init__(self,  timeout, *a, **kw):
+    def __init__(self,  timeout, lease_offset = 0, *a, **kw):
         self.timeout = timeout
         self.lock = threading.Lock()
+        self.lease_offset = lease_offset
         self.active = {}
         threading.Thread.__init__(self, *a, **kw)
     def purge_stale(self):
@@ -95,7 +96,10 @@ class Updater(threading.Thread):
                 return hwaddr, name
         return None, None
     def update(self, hwaddr, atime = None, ip = None, name = None):
-        atime = atime or time()
+        if atime:
+            atime -= self.lease_offset
+        else:
+            atime = time() 
         self.lock.acquire()
         self.active[hwaddr] = (atime, ip, name)
         self.lock.release()
@@ -146,13 +150,10 @@ class MtimeUpdater(Updater):
                 sleep(10.0)
 
 class DnsmasqUpdater(MtimeUpdater):
-    def __init__(self, lease_file, lease_offset, *a, **kw):
-        self.lease_offset = lease_offset
-        MtimeUpdater.__init__(self, *a, **kw)
     def file_changed(self, f):
         for line in f:
             ts, hwaddr, ip, name, client_id = line.split(' ')
-            self.update(hwaddr, int(ts) - self.lease_offset, ip, name)
+            self.update(hwaddr, int(ts), ip, name)
 
 class DhcpdUpdater(MtimeUpdater):
     def file_changed(self, f):
@@ -342,6 +343,6 @@ port = 8080
 if __name__ == '__main__':
     import logging
     app.logger.setLevel(logging.DEBUG)
-    updater = DhcpdUpdater(config.lease_file, config.timeout)
+    updater = DhcpdUpdater(config.lease_file, config.timeout, config.lease_offset)
     updater.start()
     app.run('0.0.0.0', config.port, debug=config.debug)
