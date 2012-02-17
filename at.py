@@ -10,7 +10,7 @@ from werkzeug.contrib.fixers import ProxyFix
 from datetime import datetime
 from wsgiref import simple_server
 from pesto import Response, dispatcher_app
-from time import sleep, time
+from time import sleep, time, mktime
 from collections import namedtuple
 from urllib import urlencode
 from hashlib import sha256
@@ -122,12 +122,13 @@ class CapUpdater(Updater):
                     traceback.format_exc(e))
                 sleep(10.0)
 
-class DnsmasqUpdater(Updater):
-    def __init__(self, lease_file, lease_offset, *a, **kw):
+class MtimeUpdater(Updater):
+    def __init__(self, lease_file, *a, **kw):
         self.lease_file = lease_file
-        self.lease_offset = lease_offset
         self.last_modified = 0
         Updater.__init__(self, *a, **kw)
+    def file_changed(self, f):
+        pass
     def run(self):
         import os
         while True:
@@ -136,15 +137,48 @@ class DnsmasqUpdater(Updater):
                 if mtime > self.last_modified:
                     app.logger.info('Lease file changed, updating')
                     with open(self.lease_file, 'r') as f:
-                        for line in f:
-                            ts, hwaddr, ip, name, client_id = line.split(' ')
-                            self.update(hwaddr, int(ts) - self.lease_offset, ip, name)
+                        self.file_changed(f)
                 self.last_modified = mtime
                 sleep(3.0)
             except Exception as e:
                 app.logger.error('Updater got an exception:\n' + \
                     traceback.format_exc(e))
                 sleep(10.0)
+
+class DnsmasqUpdater(MtimeUpdater):
+    def __init__(self, lease_file, lease_offset, *a, **kw):
+        self.lease_offset = lease_offset
+        MtimeUpdater.__init__(self, *a, **kw)
+    def file_changed(self, f):
+        for line in f:
+            ts, hwaddr, ip, name, client_id = line.split(' ')
+            self.update(hwaddr, int(ts) - self.lease_offset, ip, name)
+
+class DhcpdUpdater(MtimeUpdater):
+    def file_changed(self, f):
+        lease = False
+        for line in f:
+            line = line.split('#')[0]
+            cmd = line.strip().split()
+            if not cmd:
+                continue
+            if lease:
+                field = cmd[0]
+                if(field == 'starts'):
+                    dt = datetime.strptime(' '.join(cmd[2:]), '%Y/%m/%d %H:%M:%S;')
+                    atime = mktime(dt.utctimetuple())
+                if(field == 'client-hostname'):
+                    name = cmd[1]
+                if(field == 'hardware'):
+                    hwaddr = cmd[2]
+                if(field.startswith('}')):
+                    lease = False
+                    if hwaddr:
+                        self.update(hwaddr, atime, ip, name)
+            elif cmd[0] == 'lease':
+                ip = cmd[1]
+                name, hwaddr, atime = [None] * 3
+                lease = True
         
 @app.route('/')
 def main_view():
@@ -308,6 +342,6 @@ port = 8080
 if __name__ == '__main__':
     import logging
     app.logger.setLevel(logging.DEBUG)
-    updater = DnsmasqUpdater(config.lease_file, config.lease_offset, config.timeout)
+    updater = DhcpdUpdater(config.lease_file, config.timeout)
     updater.start()
     app.run('0.0.0.0', config.port, debug=config.debug)
