@@ -171,7 +171,7 @@ class DhcpdUpdater(MtimeUpdater):
                 if(field == 'client-hostname'):
                     name = cmd[1]
                 if(field == 'hardware'):
-                    hwaddr = cmd[2]
+                    hwaddr = cmd[2][:-1]
                 if(field.startswith('}')):
                     lease = False
                     if hwaddr:
