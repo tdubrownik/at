@@ -169,7 +169,7 @@ class DhcpdUpdater(MtimeUpdater):
                     dt = datetime.strptime(' '.join(cmd[2:]), '%Y/%m/%d %H:%M:%S;')
                     atime = mktime(dt.utctimetuple())
                 if(field == 'client-hostname'):
-                    name = cmd[1]
+                    name = cmd[1][1:-2]
                 if(field == 'hardware'):
                     hwaddr = cmd[2][:-1]
                 if(field.startswith('}')):
