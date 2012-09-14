@@ -4,6 +4,9 @@ import sqlite3
 import threading
 import traceback
 import json
+import requests
+import os
+import logging
 from flask import Flask, render_template, abort, g, \
     redirect, session, request, flash, url_for
 from werkzeug.contrib.fixers import ProxyFix
@@ -44,6 +47,10 @@ def req_to_ctx():
 def strfts(ts, format='%d/%m/%Y %H:%M'):
     return datetime.fromtimestamp(ts).strftime(format)
 
+@app.template_filter('wikiurl')
+def wikiurl(user):
+    return config.wiki_url % { 'login': user }
+
 @app.before_request
 def make_connection():
     conn = sqlite3.connect(config.db)
@@ -56,18 +63,15 @@ def close_connection(exception):
     g.db.close()
 
 DeviceInfo = namedtuple('DeviceInfo', ['hwaddr', 'name', 'owner', 'ignored'])
-User = namedtuple('User', ['id', 'login', 'passwd', 'url'])
 
 def get_device_info(conn, hwaddr):
     return list(get_device_infos(conn, (hwaddrs,)))[0]
 
 def get_device_infos(conn, hwaddrs):
-    stmt = '''select hwaddr, name, ignored, userid, login, url from 
-        devices left join users on devices.owner = users.userid
-        where devices.hwaddr in (''' + ','.join(['?'] * len(hwaddrs)) + ')'
+    stmt = '''select hwaddr, name, ignored, owner from 
+        devices where devices.hwaddr in (''' + ','.join(['?'] * len(hwaddrs)) + ')'
     for row in conn.execute(stmt, hwaddrs):
-        owner = User(row['userid'], row['login'], None, row['url']) \
-            if row['login'] else None
+        owner = row['owner'] or ''
         ignored = row['ignored']
         yield DeviceInfo(row['hwaddr'], row['name'], owner, ignored)
 
@@ -78,6 +82,7 @@ class Updater(threading.Thread):
         self.lease_offset = lease_offset
         self.active = {}
         threading.Thread.__init__(self, *a, **kw)
+        self.daemon = True
     def purge_stale(self):
         now = time()
         for addr, (atime, ip, name) in self.active.items():
@@ -134,7 +139,6 @@ class MtimeUpdater(Updater):
     def file_changed(self, f):
         pass
     def run(self):
-        import os
         while True:
             try:
                 mtime = os.stat(self.lease_file).st_mtime
@@ -190,10 +194,9 @@ def list_all():
     result = now_at()
     def prettify_user((user, atime)):
         return {
-            'login': user.login,
+            'login': user,
             'timestamp': atime,
             'pretty_time': strfts(atime),
-            'url': user.url,
         }
     result['users'] = map(prettify_user, result['users'])
     result['unknown'] = len(result['unknown'])
@@ -212,45 +215,18 @@ def now_at():
 restrict_to_hs = restrict_ip(prefix=config.claimable_prefix, 
     exclude=config.claimable_exclude)
 
-@app.route('/register', methods=['GET'])
-@restrict_to_hs
-def register_form():
-    return render_template('register.html', **req_to_ctx())
-
-@app.route('/register', methods=['POST'])
-@restrict_to_hs
-def register():
-    login = request.form['login'].lower()
-    url = request.form['url']
-    if 'wiki' in request.form:
-        url = config.wiki_url % { 'login': login }
-    try:
-        g.db.execute('insert into users (login, url, pass) values (?, ?, ?)',
-            [login, url, sha256(request.form['password']).hexdigest()])
-        return redirect('/')
-    except sqlite3.Error as e:
-        flash('Cannot add user - username taken?', category='error')
-        return register_form()
-
 @app.route('/login', methods=['GET'])
 def login_form():
     return render_template('login.html', **req_to_ctx())
-
-def get_user(conn, login, password):
-    row = conn.execute('select userid, login, pass, url from users where\
-     login = ? and pass = ?', [login, sha256(password).hexdigest()]).fetchone()
-    return row and User(row['userid'], row['login'], None, row['url'])
 
 @app.route('/login', methods=['POST'])
 def login():
     login = request.form.get('login', '').lower()
     pwd = request.form.get('password', '')
     goto = request.values.get('goto') or '/'
-    user = get_user(g.db, login, pwd)
-    if user:
-        session['userid'] = user.id
-        session['login'] = user.login
-        session['user'] = user
+    if requests.post('https://auth.hackerspace.pl', verify=False,
+            data = { 'login': login, 'password': pwd }).status_code == 200:
+        session['login'] = login
         return redirect(goto)
     else:
         flash('Username or password invalid', category='error')
@@ -264,7 +240,7 @@ def logout():
 def login_required(f):
     @wraps(f)
     def func(*a, **kw):
-        if 'userid' not in session:
+        if 'login' not in session:
             flash('You must log in to continue', category='error')
             return redirect('/login?' + 
                 urlencode({'goto': request.path}))
@@ -287,10 +263,10 @@ def claim():
     if not hwaddr:
         ctx = { 'error': 'Invalid device.' }
     else:
-        userid = session['userid']
+        login = session['login']
         try:
             g.db.execute('insert into devices (hwaddr, name, owner, ignored)\
-                values (?, ?, ?, ?)', [hwaddr, request.form['name'], userid, False])
+                values (?, ?, ?, ?)', [hwaddr, request.form['name'], login, False])
             ctx = {}
         except sqlite3.Error as e:
             ctx = { 'error': 'Could not add device! Perhaps someone claimed it?' }
@@ -298,39 +274,28 @@ def claim():
 
 def get_user_devices(conn, user):
     devs = conn.execute('select hwaddr, name, ignored from devices where\
- owner = ?', [user.id])
+ owner = ?', [user])
     return (DeviceInfo(row['hwaddr'], row['name'], user, row['ignored']) for
         row in devs)
 
-def set_password(conn, user, password):
-    return conn.execute('update users set pass = ? where userid = ?',
-        [sha256(password).hexdigest(), user.id])
-
-@app.route('/account', methods=['GET','POST'])
+@app.route('/account', methods=['GET'])
 @login_required
 def account():
-    if request.method == 'POST':
-        old = request.form['old']
-        if get_user(g.db, session['login'], old) and \
-            set_password(g.db, session['user'], request.form['new']):
-                flash('Password changed', category='message')
-        else:
-            flash('Could not change password!', category='error')
-    devices = get_user_devices(g.db, session['user'])
+    devices = get_user_devices(g.db, session['login'])
     return render_template('account.html', devices=devices)
 
 def set_ignored(conn, hwaddr, user, value):
     return conn.execute('update devices set ignored = ? where hwaddr = ? and owner = ?',
-        [value, hwaddr, user.id])
+        [value, hwaddr, user])
 
 def delete_device(conn, hwaddr, user):
     return conn.execute('delete from devices where hwaddr = ? and owner = ?',
-        [hwaddr, user.id])
+        [hwaddr, user])
 
 @app.route('/devices/<id>/<action>/')
 @login_required
 def device(id, action):
-    user = session['user']
+    user = session['login']
     if action == 'hide':
         set_ignored(g.db, id, user, True)
     if action == 'show':
@@ -341,7 +306,6 @@ def device(id, action):
 
 port = 8080
 if __name__ == '__main__':
-    import logging
     app.logger.setLevel(logging.DEBUG)
     updater = DhcpdUpdater(config.lease_file, config.timeout, config.lease_offset)
     updater.start()

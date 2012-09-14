@@ -8,11 +8,9 @@ Now at hackerspace
   <ul>
   {% for user, timestamp in users %}
     <li>
-    {% if user.url %}
-      <a href="{{ user.url }}">{% endif %}
-      {{ user.login }} ({{ timestamp|strfts() }})
-      {% if user.url %}</a>
-    {% endif %}
+      <a href="{{ user | wikiurl }}">
+      {{ user }} ({{ timestamp|strfts() }})
+      </a>
     </li>
   {% endfor %}
   </ul>

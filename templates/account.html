@@ -5,27 +5,6 @@
 {% for msg in get_flashed_messages(True) %}
   <p class="{{ msg[0] }}">{{ msg[1] }}</p>
 {% endfor %}
-<h3>Change password</h3>
-<form action="" method="POST">
-  <table>
-    <label><tr>
-      <td>Current password:</td>
-      <td><input type="password" name="old"></td>
-    </tr></label>
-    <label><tr>
-      <td>New password:</td>
-      <td><input type="password" name="new"></td>
-    </tr></label>
-    <label><tr>
-      <td>Confirm new password:</td>
-      <td><input type="password" name="new2"></td>
-    </tr></label>
-    <label><tr>
-      <td></td>
-      <td><input type="submit" value="Save"></td>
-    </tr></label>
-  </table>
-</form>
 <h3>Claimed devices</h3>
 <table class="devices">
   <tr>
