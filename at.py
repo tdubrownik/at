@@ -18,11 +18,9 @@ from collections import namedtuple
 from urllib import urlencode
 from hashlib import sha256
 
-import config
-
 app = Flask('at')
+app.config.from_pyfile('at.cfg')
 app.wsgi_app = ProxyFix(app.wsgi_app)
-app.secret_key = config.secret_key
 app.jinja_env.add_extension('jinja2.ext.i18n')
 app.jinja_env.install_null_translations()
 app.updater = None
@@ -49,11 +47,11 @@ def strfts(ts, format='%d/%m/%Y %H:%M'):
 
 @app.template_filter('wikiurl')
 def wikiurl(user):
-    return config.wiki_url % { 'login': user }
+    return app.config['WIKI_URL'] % { 'login': user }
 
 @app.before_request
 def make_connection():
-    conn = sqlite3.connect(config.db)
+    conn = sqlite3.connect(app.config['DB'])
     conn.row_factory = sqlite3.Row
     conn.isolation_level = None # for autocommit mode
     g.db = conn
@@ -212,8 +210,8 @@ def now_at():
     unknown = set(devices.keys()) - set(d.hwaddr for d in device_infos)
     return dict(users=users, unknown=unknown)
 
-restrict_to_hs = restrict_ip(prefix=config.claimable_prefix, 
-    exclude=config.claimable_exclude)
+restrict_to_hs = restrict_ip(prefix=app.config['CLAIMABLE_PREFIX'], 
+    exclude=app.config['CLAIMABLE_EXCLUDE'])
 
 @app.route('/login', methods=['GET'])
 def login_form():
@@ -306,7 +304,8 @@ def device(id, action):
 
 @app.before_first_request
 def setup():
-    updater = DhcpdUpdater(config.lease_file, config.timeout, config.lease_offset)
+    updater = DhcpdUpdater(app.config['LEASE_FILE'], app.config['TIMEOUT'], 
+            app.config['LEASE_OFFSET'])
     updater.start()
     app.updater = updater
 
@@ -314,4 +313,4 @@ def setup():
 port = 8080
 if __name__ == '__main__':
     app.logger.setLevel(logging.DEBUG)
-    app.run('0.0.0.0', config.port, debug=config.debug)
+    app.run('0.0.0.0', 8080, debug=True)
