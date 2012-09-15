@@ -1,0 +1,14 @@
+DB = './at.db'
+CAP_FILE = './dhcp-cap'
+LEASE_FILE = './dhcpd.leases'
+LEASE_OFFSET = -60 * 60
+TIMEOUT = 1500
+
+WIKI_URL = 'http://hackerspace.pl/wiki/doku.php?id=people:%(login)s:start'
+
+CLAIMABLE_PREFIX = '10.8.0.' #'192.168.1.'
+CLAIMABLE_EXCLUDE = [
+#    '127.0.0.1',
+]
+
+SECRET_KEY = 'adaba'
