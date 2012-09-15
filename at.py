@@ -25,7 +25,7 @@ app.wsgi_app = ProxyFix(app.wsgi_app)
 app.secret_key = config.secret_key
 app.jinja_env.add_extension('jinja2.ext.i18n')
 app.jinja_env.install_null_translations()
-updater = None
+app.updater = None
 
 from functools import wraps
 
@@ -203,7 +203,7 @@ def list_all():
     return json.dumps(result)
 
 def now_at():
-    devices = updater.get_active_devices()
+    devices = app.updater.get_active_devices()
     device_infos = list(get_device_infos(g.db, devices.keys()))
     device_infos.sort(key=lambda di: devices.__getitem__)
     users = list(dict((info.owner, devices[info.hwaddr][0]) for info in device_infos 
@@ -251,14 +251,14 @@ def login_required(f):
 @restrict_to_hs
 @login_required
 def claim_form():
-    hwaddr, name = updater.get_device(request.remote_addr)
+    hwaddr, name = app.updater.get_device(request.remote_addr)
     return render_template('claim.html', hwaddr=hwaddr, name=name)
 
 @app.route('/claim', methods=['POST'])
 @restrict_to_hs
 @login_required
 def claim():
-    hwaddr, lease_name = updater.get_device(request.remote_addr)
+    hwaddr, lease_name = app.updater.get_device(request.remote_addr)
     ctx = None
     if not hwaddr:
         ctx = { 'error': 'Invalid device.' }
@@ -304,9 +304,14 @@ def device(id, action):
         delete_device(g.db, id, user)
     return redirect(url_for('account'))
 
+@app.before_first_request
+def setup():
+    updater = DhcpdUpdater(config.lease_file, config.timeout, config.lease_offset)
+    updater.start()
+    app.updater = updater
+
+
 port = 8080
 if __name__ == '__main__':
     app.logger.setLevel(logging.DEBUG)
-    updater = DhcpdUpdater(config.lease_file, config.timeout, config.lease_offset)
-    updater.start()
     app.run('0.0.0.0', config.port, debug=config.debug)
